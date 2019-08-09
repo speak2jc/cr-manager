@@ -31,4 +31,4 @@ If not feasible, the change would need to be otherwise managed (e.g. try to avoi
 
 ## Further work
 - Add functionality to update, delete, list and get Keevakind objects
-- This project also contains code to generate the CRD on the cluster
+- This project also contains code to generate the CRD on the cluster - this is incomplete but lo-prio as the CRD would not typically be created from this project.
