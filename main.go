@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"fmt"
 	"github.com/speak2jc/k-op/pkg/apis/example/v1alpha1"
 	apixv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
@@ -10,14 +11,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"log"
 	"os/user"
 	"path/filepath"
 	"strings"
-	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
-	"crypto/rand"
 )
 
 var (
@@ -37,8 +37,14 @@ func main() {
 	client, err := dynamic.NewForConfig(config)
 	errExit("Failed to create client", err)
 
+	name := "keeva-" + RandomString(5)
+	namespace := "james"
+
 	RegisterRuntimeClassCRD(config)
-	CreateSampleKeevaKinds(client)
+	CreateSampleKeevaKinds(client, name, namespace)
+	kk := GetSampleKeevaKinds(client, name, namespace)
+	log.Printf("Found existing Keevakind %s", kk)
+	//UpdateSampleKeevaKinds(client, name, namespace)
 }
 
 func RegisterRuntimeClassCRD(config *rest.Config) {
@@ -71,11 +77,11 @@ func RegisterRuntimeClassCRD(config *rest.Config) {
 						"spec": {
 							Properties: map[string]apixv1beta1.JSONSchemaProps{
 								"runtimeHandler": {
-									Type:    "string",
+									Type: "string",
 									//Pattern: "abc",
 								},
 								"kind": {
-									Type:    "string",
+									Type: "string",
 								},
 							},
 						},
@@ -95,14 +101,12 @@ func RegisterRuntimeClassCRD(config *rest.Config) {
 	}
 }
 
-func CreateSampleKeevaKinds(client dynamic.Interface) {
+func CreateSampleKeevaKinds(client dynamic.Interface, name string, namespace string) {
 
 	res := client.Resource(keevakindGVR)
 
-	namespace := "james"
-	name := "keeva-" + RandomString(5)
-	var count int32 = 3214
-	var port int32 = 3214
+	var count int32 = 1
+	var port int32 = 8080
 	group := "Group-" + RandomString(5)
 	image := "Image-" + RandomString(5)
 
@@ -112,6 +116,39 @@ func CreateSampleKeevaKinds(client dynamic.Interface) {
 	_, err := res.Create(rc, metav1.CreateOptions{})
 	errExit(fmt.Sprintf("Failed to create Keevakind %#v", rc), err)
 
+}
+
+func UpdateSampleKeevaKinds(client dynamic.Interface, name string, namespace string) {
+
+	res := client.Resource(keevakindGVR)
+
+	//var count int32 = 2
+	//var port int32 = 8080
+	//group := "Group-" + RandomString(5)
+	//image := "Image-" + RandomString(5)
+
+	log.Printf("Getting Keevakind %s", name)
+	//rc := NewKeevaKind(name, namespace, count, group, image, port)
+	//log.Printf("rc %s", rc)
+
+	rc, err := res.Get(name, metav1.GetOptions{})
+
+	errExit(fmt.Sprintf("Failed to create Keevakind %#v", rc), err)
+
+}
+
+func GetSampleKeevaKinds(client dynamic.Interface, name string, namespace string) *unstructured.Unstructured {
+
+	res := client.Resource(keevakindGVR)
+
+	log.Printf("Getting Keevakind %s", name)
+
+	var existingKeeva *unstructured.Unstructured
+	existingKeeva, err := res.Get(name, metav1.GetOptions{})
+
+	errExit(fmt.Sprintf("Failed to create Keevakind %s in namespace %s", name, namespace), err)
+
+	return existingKeeva
 }
 
 func errExit(msg string, err error) {
@@ -133,14 +170,14 @@ func NewKeevaKind(name string, namespace string, count int32, group string, imag
 			"kind":       "Keevakind",
 			"apiVersion": keevakindGVR.Group + "/v1alpha1",
 			"metadata": map[string]interface{}{
-				"name": name,
+				"name":      name,
 				"namespace": namespace,
 			},
-			"spec": v1alpha1.KeevakindSpec {
+			"spec": v1alpha1.KeevakindSpec{
 				Count: count,
 				Group: group,
 				Image: image,
-				Port: port,
+				Port:  port,
 			},
 		},
 	}
