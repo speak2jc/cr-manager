@@ -37,14 +37,157 @@ func main() {
 	client, err := dynamic.NewForConfig(config)
 	errExit("Failed to create client", err)
 
-	name := "keeva-" + RandomString(5)
+	name := "keeva-" + RandomString(3)
 	namespace := "james"
 
 	RegisterRuntimeClassCRD(config)
-	CreateSampleKeevaKinds(client, name, namespace)
-	kk := GetSampleKeevaKinds(client, name, namespace)
-	log.Printf("Found existing Keevakind %s", kk)
-	//UpdateSampleKeevaKinds(client, name, namespace)
+
+	// Create
+	CreateKeevakind(client, name, namespace)
+
+	// Get
+	existingKeevakind, err := GetKeevakind(client, name, namespace)
+
+	if err == nil {
+		log.Printf("Retrieved Keevakind %s", existingKeevakind)
+
+		//payload := existingKeevakind.Object["spec"].(map[string]interface{})
+		//payload["group"] = "mygroup"
+
+		existingKeevakind.Spec.Group = "mygroup1"
+		//log.Printf("Updating payload %s", payload)
+
+		// Update
+		UpdateKeevakind(client, existingKeevakind)
+
+		// Get again
+		existingKeevakind, _ = GetKeevakind(client, name, namespace)
+		log.Printf("Retrieved Keevakind %s", existingKeevakind)
+
+	}
+}
+
+func CreateKeevakind(client dynamic.Interface, name string, namespace string) v1alpha1.Keevakind {
+
+	res := client.Resource(keevakindGVR)
+
+	var count int32 = 14
+	var port int32 = 8080
+	group := "Group-" + RandomString(5)
+	image := "Image-" + RandomString(5)
+
+	log.Printf("Creating Keevakind %s", name)
+
+	keevakind := v1alpha1.Keevakind{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       v1alpha1.KeevakindSpec{Count: count, Group: group, Port: port, Image: image},
+		Status:     v1alpha1.KeevakindStatus{},
+	}
+
+	keevakindRaw := mapToUnstructured(keevakind)
+	_, err := res.Create(keevakindRaw, metav1.CreateOptions{})
+	errExit(fmt.Sprintf("Failed to create Keevakind %#v", keevakind), err)
+
+	return keevakind
+}
+
+func UpdateKeevakind(client dynamic.Interface, keevakind v1alpha1.Keevakind) {
+
+	res := client.Resource(keevakindGVR)
+	converted := mapToUnstructured(keevakind)
+	rc, err := res.Update(converted, metav1.UpdateOptions{})
+	errExit(fmt.Sprintf("Failed to update Keevakind %#v", rc), err)
+}
+
+func GetKeevakind(client dynamic.Interface, name string, namespace string) (v1alpha1.Keevakind, error) {
+
+	log.Printf("Getting Keevakind %s", name)
+
+	var keevakind v1alpha1.Keevakind
+	res := client.Resource(keevakindGVR)
+	existingKeeva, err := res.Get(name, metav1.GetOptions{})
+	errExit(fmt.Sprintf("Failed to Get Keevakind %s in namespace %s", name, namespace), err)
+
+	if existingKeeva == nil {
+		err := errors.NewNotFound(schema.GroupResource{"example.keeva.com", "keevakind"}, name)
+		return keevakind, err
+	}
+
+	keevakind = mapToKeevakind(existingKeeva, namespace)
+	return keevakind, nil
+}
+
+func mapToKeevakind(in *unstructured.Unstructured, namespace string) v1alpha1.Keevakind {
+
+	objMap := in.Object
+
+	apiVersion := objMap["apiVersion"].(string)
+	kind := objMap["kind"].(string)
+	metadata := objMap["metadata"].(map[string]interface{})
+	name := metadata["name"].(string)
+	resourceVersion := metadata["resourceVersion"].(string)
+	//	namespace := metadata["namespace"].(string) - TODO - add to CRD - currently does not seem to store it
+
+	spec := objMap["spec"].(map[string]interface{})
+	group := spec["group"].(string)
+	image := spec["image"].(string)
+	port := int32(spec["port"].(int64))
+	count := int32(spec["count"].(int64))
+
+	keevakind := v1alpha1.Keevakind{
+		TypeMeta:   metav1.TypeMeta{APIVersion: apiVersion, Kind: kind},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, ResourceVersion: resourceVersion},
+		Spec:       v1alpha1.KeevakindSpec{Count: count, Group: group, Port: port, Image: image},
+		Status:     v1alpha1.KeevakindStatus{},
+	}
+
+	return keevakind
+}
+
+func mapToUnstructured(in v1alpha1.Keevakind) *unstructured.Unstructured {
+
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "Keevakind",
+			"apiVersion": keevakindGVR.Group + "/v1alpha1",
+			"metadata": map[string]interface{}{
+				"resourceVersion": in.ObjectMeta.ResourceVersion,
+				"name":            in.Name,
+				"namespace":       in.Namespace,
+			},
+			"spec": v1alpha1.KeevakindSpec{
+				Count: in.Spec.Count,
+				Group: in.Spec.Group,
+				Image: in.Spec.Image,
+				Port:  in.Spec.Port,
+			},
+		},
+	}
+
+}
+
+func errExit(msg string, err error) {
+	if err != nil {
+		log.Fatalf("%s: %#v", msg, err)
+	}
+}
+
+func userConfig() string {
+	usr, err := user.Current()
+	errExit("Failed to get current user", err)
+	return filepath.Join(usr.HomeDir, ".kube", "config")
+}
+
+func RandomString(len int) string {
+	n := 5
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	s := fmt.Sprintf("%X", b)
+	fmt.Println(s)
+
+	return strings.ToLower(s)
 }
 
 func RegisterRuntimeClassCRD(config *rest.Config) {
@@ -99,98 +242,4 @@ func RegisterRuntimeClassCRD(config *rest.Config) {
 			errExit("Failed to create Keevakind CRD", err)
 		}
 	}
-}
-
-func CreateSampleKeevaKinds(client dynamic.Interface, name string, namespace string) {
-
-	res := client.Resource(keevakindGVR)
-
-	var count int32 = 1
-	var port int32 = 8080
-	group := "Group-" + RandomString(5)
-	image := "Image-" + RandomString(5)
-
-	log.Printf("Creating Keevakind %s", name)
-	rc := NewKeevaKind(name, namespace, count, group, image, port)
-	log.Printf("rc %s", rc)
-	_, err := res.Create(rc, metav1.CreateOptions{})
-	errExit(fmt.Sprintf("Failed to create Keevakind %#v", rc), err)
-
-}
-
-func UpdateSampleKeevaKinds(client dynamic.Interface, name string, namespace string) {
-
-	res := client.Resource(keevakindGVR)
-
-	//var count int32 = 2
-	//var port int32 = 8080
-	//group := "Group-" + RandomString(5)
-	//image := "Image-" + RandomString(5)
-
-	log.Printf("Getting Keevakind %s", name)
-	//rc := NewKeevaKind(name, namespace, count, group, image, port)
-	//log.Printf("rc %s", rc)
-
-	rc, err := res.Get(name, metav1.GetOptions{})
-
-	errExit(fmt.Sprintf("Failed to create Keevakind %#v", rc), err)
-
-}
-
-func GetSampleKeevaKinds(client dynamic.Interface, name string, namespace string) *unstructured.Unstructured {
-
-	res := client.Resource(keevakindGVR)
-
-	log.Printf("Getting Keevakind %s", name)
-
-	var existingKeeva *unstructured.Unstructured
-	existingKeeva, err := res.Get(name, metav1.GetOptions{})
-
-	errExit(fmt.Sprintf("Failed to create Keevakind %s in namespace %s", name, namespace), err)
-
-	return existingKeeva
-}
-
-func errExit(msg string, err error) {
-	if err != nil {
-		log.Fatalf("%s: %#v", msg, err)
-	}
-}
-
-func userConfig() string {
-	usr, err := user.Current()
-	errExit("Failed to get current user", err)
-
-	return filepath.Join(usr.HomeDir, ".kube", "config")
-}
-
-func NewKeevaKind(name string, namespace string, count int32, group string, image string, port int32) *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"kind":       "Keevakind",
-			"apiVersion": keevakindGVR.Group + "/v1alpha1",
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": namespace,
-			},
-			"spec": v1alpha1.KeevakindSpec{
-				Count: count,
-				Group: group,
-				Image: image,
-				Port:  port,
-			},
-		},
-	}
-}
-
-func RandomString(len int) string {
-	n := 5
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
-	s := fmt.Sprintf("%X", b)
-	fmt.Println(s)
-
-	return strings.ToLower(s)
 }
